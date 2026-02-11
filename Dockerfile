@@ -1,21 +1,46 @@
+# tailscale-setup/Dockerfile
 FROM node:22-bookworm
 
-# Install Bun (required for build scripts)
+# 1. Install system prerequisites
+RUN apt-get update && \
+    apt-get install -y build-essential curl file git golang-go ffmpeg sudo ca-certificates gnupg
+RUN apt-get install -y jq
+
+# 2. Install Tailscale
+RUN mkdir -p --mode=0755 /usr/share/keyrings && \
+    curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null && \
+    curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.tailscale-keyring.list | tee /etc/apt/sources.list.d/tailscale.list && \
+    apt-get update && \
+    apt-get install -y tailscale
+RUN apt-get install -y jq
+
+# 3. Create a 'linuxbrew' user setup
+RUN mkdir -p /home/linuxbrew/.linuxbrew && \
+    chown -R node:node /home/linuxbrew/.linuxbrew
+
+# 4. Switch to 'node' user for Brew
+USER node
+RUN /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+ENV PATH="/home/linuxbrew/.linuxbrew/bin:${PATH}"
+
+# 5. Install tools via Brew
+RUN brew install uv gh
+
+# Switch back to root for setup
+USER root
+
+# Install Bun
 RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:${PATH}"
-
 RUN corepack enable
 
 WORKDIR /app
 
-ARG OPENCLAW_DOCKER_APT_PACKAGES=""
-RUN if [ -n "$OPENCLAW_DOCKER_APT_PACKAGES" ]; then \
-      apt-get update && \
-      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $OPENCLAW_DOCKER_APT_PACKAGES && \
-      apt-get clean && \
-      rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*; \
-    fi
+# Copy wrapper script
+COPY start-with-tailscale.sh /app/start-with-tailscale.sh
+RUN chmod +x /app/start-with-tailscale.sh
 
+# Install Dependencies (Cached)
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY ui/package.json ./ui/package.json
 COPY patches ./patches
@@ -23,26 +48,19 @@ COPY scripts ./scripts
 
 RUN pnpm install --frozen-lockfile
 
+# Build
 COPY . .
-RUN pnpm build
-# Force pnpm for UI build (Bun may fail on ARM/Synology architectures)
+RUN OPENCLAW_A2UI_SKIP_MISSING=1 pnpm build
 ENV OPENCLAW_PREFER_PNPM=1
 RUN pnpm ui:build
 
 ENV NODE_ENV=production
+ENV TAILSCALE_DIR=/home/node/.tailscale
 
-# Allow non-root user to write temp files during runtime/tests.
-RUN chown -R node:node /app
-
-# Security hardening: Run as non-root user
-# The node:22-bookworm image includes a 'node' user (uid 1000)
-# This reduces the attack surface by preventing container escape via root privileges
+# Run as non-root (Tailscale userspace works as user)
 USER node
+RUN mkdir -p /home/node/.tailscale
 
-# Start gateway server with default config.
-# Binds to loopback (127.0.0.1) by default for security.
-#
-# For container platforms requiring external health checks:
-#   1. Set OPENCLAW_GATEWAY_TOKEN or OPENCLAW_GATEWAY_PASSWORD env var
-#   2. Override CMD: ["node","openclaw.mjs","gateway","--allow-unconfigured","--bind","lan"]
-CMD ["node", "openclaw.mjs", "gateway", "--allow-unconfigured"]
+# Entrypoint wrapper
+ENTRYPOINT ["/app/start-with-tailscale.sh"]
+CMD ["node", "dist/index.js", "gateway", "--port", "59765", "--allow-unconfigured"]
