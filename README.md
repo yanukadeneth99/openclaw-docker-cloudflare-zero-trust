@@ -126,7 +126,7 @@ docker compose logs -f openclaw-gateway
 To run OpenClaw CLI commands inside the container:
 
 ```bash
-docker compose exec openclaw-gateway openclaw doctor
+docker exec -it openclaw-core node dist/index.js doctor
 ```
 
 ---
@@ -138,7 +138,7 @@ After the containers are running, you need to configure your OpenClaw instance. 
 Run the onboarding wizard inside the container:
 
 ```bash
-docker compose exec -it openclaw-gateway openclaw onboard
+docker exec -it openclaw-core node dist/index.js onboard
 ```
 
 Follow the interactive prompts in your terminal. This wizard will guide you through the initial setup securely. All configuration is saved to the persistent `data/` volume.
@@ -160,13 +160,13 @@ You can connect other OpenClaw nodes (like the macOS app or another CLI agent) t
     - To list all pending connection requests:
 
     ```bash
-    docker compose exec openclaw-gateway openclaw pairing list
+    docker exec -it openclaw-core node dist/index.js pairing list
     ```
 
     - Run the approval command inside the docker container:
 
     ```bash
-    docker compose exec openclaw-gateway openclaw pairing approve <NODE_ID_OR_CHANNEL> <CODE>
+    docker exec -it openclaw-core node dist/index.js pairing approve <NODE_ID_OR_CHANNEL> <CODE>
     ```
 
 ## Practical Use Cases
